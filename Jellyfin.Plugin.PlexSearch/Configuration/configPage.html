@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Plex Search</title>
+</head>
+<body>
+<div id="PlexSearchConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select,emby-checkbox">
+    <div data-role="content">
+        <div class="content-primary">
+            <h2 class="sectionTitle">Plex Search</h2>
+            <p>Adds an <b>On Plex</b> section to Jellyfin search, using a Plex server you own or that is shared with you.</p>
+
+            <!-- Step 1: sign in -->
+            <div class="verticalSection">
+                <h3 class="sectionTitle">1. Plex account</h3>
+                <p id="psAccountStatus">Checking…</p>
+                <button is="emby-button" type="button" id="psSignIn" class="raised button-submit block">Sign in with Plex</button>
+                <p id="psPinHelp" style="display:none">
+                    A Plex sign-in page has opened in a new tab. Approve it there, then come back. This page updates by itself.
+                    If nothing opened, <a id="psPinLink" target="_blank" rel="noopener">open the Plex sign-in page</a>.
+                </p>
+                <button is="emby-button" type="button" id="psSignOut" class="raised block" style="display:none">Sign out of Plex</button>
+            </div>
+
+            <!-- Step 2: server -->
+            <div class="verticalSection" id="psServerSection" style="display:none">
+                <h3 class="sectionTitle">2. Plex server</h3>
+                <div class="selectContainer">
+                    <select is="emby-select" id="psServer" label="Server"></select>
+                </div>
+                <button is="emby-button" type="button" id="psSelectServer" class="raised block">Use this server</button>
+                <p id="psServerStatus"></p>
+            </div>
+
+            <!-- Step 3: libraries & options -->
+            <div class="verticalSection" id="psLibrarySection" style="display:none">
+                <h3 class="sectionTitle">3. Libraries and options</h3>
+                <p>Tick the libraries to search. Leave all unticked to search every movie and TV library.</p>
+                <div id="psLibraries" class="checkboxList"></div>
+                <div class="inputContainer">
+                    <input is="emby-input" type="number" id="psMaxResults" min="1" max="50" label="Maximum results" />
+                </div>
+                <div class="inputContainer">
+                    <input is="emby-input" type="number" id="psTimeout" min="1" max="30" label="Plex timeout (seconds)" />
+                </div>
+                <button is="emby-button" type="button" id="psSave" class="raised button-submit block">Save</button>
+            </div>
+
+            <!-- Step 4: client script -->
+            <div class="verticalSection">
+                <h3 class="sectionTitle">4. Show results in search</h3>
+                <p>Install the <b>JavaScript Injector</b> plugin, add a new script, and paste this in:</p>
+                <pre id="psSnippet" style="white-space:pre-wrap;user-select:all;padding:.8em;background:rgba(127,127,127,.15);border-radius:6px"></pre>
+                <p>Then refresh the Jellyfin web page (and restart the Android app).</p>
+            </div>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+        (function () {
+            var page = document.querySelector('#PlexSearchConfigPage');
+            var pollTimer = null;
+
+            // Jellyfin may serialise as PascalCase or camelCase; normalise keys to camelCase.
+            function norm(o) {
+                if (Array.isArray(o)) return o.map(norm);
+                if (o && typeof o === 'object') {
+                    var r = {};
+                    Object.keys(o).forEach(function (k) { r[k.charAt(0).toLowerCase() + k.slice(1)] = norm(o[k]); });
+                    return r;
+                }
+                return o;
+            }
+
+            function api(method, path, body) {
+                var opts = { type: method, url: ApiClient.getUrl('PlexSearch/' + path) };
+                if (body !== undefined) {
+                    opts.data = JSON.stringify(body);
+                    opts.contentType = 'application/json';
+                }
+                if (method === 'GET' || path.indexOf('Auth/Pin') === 0 && method === 'POST') {
+                    opts.dataType = 'json';
+                }
+                return ApiClient.ajax(opts).then(function (r) { return norm(r); });
+            }
+
+            function errText(e) {
+                if (e && e.status) return 'Error ' + e.status + (e.statusText ? ' (' + e.statusText + ')' : '');
+                return 'Something went wrong.';
+            }
+
+            function show(id, on) { page.querySelector(id).style.display = on ? '' : 'none'; }
+
+            function loadStatus() {
+                Dashboard.showLoadingMsg();
+                return api('GET', 'Status').then(function (s) {
+                    page.querySelector('#psAccountStatus').textContent = s.signedIn
+                        ? 'Signed in to Plex' + (s.username ? ' as ' + s.username : '') + '.'
+                        : 'Not signed in.';
+                    show('#psSignIn', !s.signedIn);
+                    show('#psSignOut', s.signedIn);
+                    show('#psServerSection', s.signedIn);
+                    show('#psLibrarySection', s.serverConnected);
+                    page.querySelector('#psServerStatus').textContent = s.serverConnected
+                        ? 'Using: ' + s.serverName
+                        : 'No server selected yet.';
+                    page.querySelector('#psMaxResults').value = s.maxResults;
+                    page.querySelector('#psTimeout').value = s.timeoutSeconds;
+                    var jobs = [];
+                    if (s.signedIn) jobs.push(loadServers(s.serverMachineId));
+                    if (s.serverConnected) jobs.push(loadLibraries(s.librarySectionIds || []));
+                    return Promise.all(jobs);
+                }).catch(function (e) {
+                    page.querySelector('#psAccountStatus').textContent = errText(e);
+                }).finally(function () { Dashboard.hideLoadingMsg(); });
+            }
+
+            function loadServers(selectedId) {
+                return api('GET', 'Servers').then(function (servers) {
+                    var sel = page.querySelector('#psServer');
+                    sel.innerHTML = servers.map(function (s) {
+                        var label = s.name + (s.owned ? ' (yours)' : (s.sourceTitle ? ' (shared by ' + s.sourceTitle + ')' : ' (shared)'));
+                        return '<option value="' + s.machineId + '"' + (s.machineId === selectedId ? ' selected' : '') + '>'
+                            + label.replace(/</g, '&lt;') + '</option>';
+                    }).join('');
+                }).catch(function (e) {
+                    page.querySelector('#psServerStatus').textContent = 'Could not list servers: ' + errText(e);
+                });
+            }
+
+            function loadLibraries(selected) {
+                return api('GET', 'Libraries').then(function (libs) {
+                    page.querySelector('#psLibraries').innerHTML = libs.map(function (l) {
+                        var checked = selected.indexOf(String(l.id)) !== -1 ? ' checked' : '';
+                        return '<label><input is="emby-checkbox" type="checkbox" class="psLib" value="' + l.id + '"' + checked + ' />'
+                            + '<span>' + l.title.replace(/</g, '&lt;') + ' (' + (l.type === 'show' ? 'TV' : 'Movies') + ')</span></label>';
+                    }).join('') || '<p>No movie or TV libraries found.</p>';
+                }).catch(function (e) {
+                    page.querySelector('#psLibraries').innerHTML = '<p>Could not load libraries: ' + errText(e) + '</p>';
+                });
+            }
+
+            page.querySelector('#psSignIn').addEventListener('click', function () {
+                var win = window.open('about:blank', '_blank');
+                api('POST', 'Auth/Pin').then(function (pin) {
+                    page.querySelector('#psPinLink').href = pin.authUrl;
+                    show('#psPinHelp', true);
+                    if (win) win.location = pin.authUrl;
+                    var tries = 0;
+                    clearInterval(pollTimer);
+                    pollTimer = setInterval(function () {
+                        if (++tries > 150) { clearInterval(pollTimer); return; }
+                        api('GET', 'Auth/Pin/' + pin.id).then(function (r) {
+                            if (r.signedIn) {
+                                clearInterval(pollTimer);
+                                show('#psPinHelp', false);
+                                loadStatus();
+                            }
+                        });
+                    }, 2000);
+                }).catch(function (e) {
+                    if (win) win.close();
+                    Dashboard.alert('Plex sign-in failed: ' + errText(e));
+                });
+            });
+
+            page.querySelector('#psSignOut').addEventListener('click', function () {
+                api('POST', 'Auth/SignOut').then(loadStatus);
+            });
+
+            page.querySelector('#psSelectServer').addEventListener('click', function () {
+                var id = page.querySelector('#psServer').value;
+                if (!id) return;
+                page.querySelector('#psServerStatus').textContent = 'Connecting…';
+                Dashboard.showLoadingMsg();
+                api('POST', 'Servers/' + encodeURIComponent(id) + '/Select').then(loadStatus).catch(function (e) {
+                    page.querySelector('#psServerStatus').textContent = 'Could not connect: ' + errText(e);
+                }).finally(function () { Dashboard.hideLoadingMsg(); });
+            });
+
+            page.querySelector('#psSave').addEventListener('click', function () {
+                var ids = Array.prototype.map.call(page.querySelectorAll('.psLib:checked'), function (c) { return c.value; });
+                api('POST', 'Settings', {
+                    LibrarySectionIds: ids,
+                    MaxResults: parseInt(page.querySelector('#psMaxResults').value, 10) || 12,
+                    TimeoutSeconds: parseInt(page.querySelector('#psTimeout').value, 10) || 4
+                }).then(function () { Dashboard.processPluginConfigurationUpdateResult(); })
+                  .catch(function (e) { Dashboard.alert('Save failed: ' + errText(e)); });
+            });
+
+            page.addEventListener('pageshow', function () {
+                page.querySelector('#psSnippet').textContent =
+                    "(function w(){if(!window.ApiClient){return setTimeout(w,500);}var s=document.createElement('script');"
+                    + "s.src=ApiClient.getUrl('PlexSearch/ClientScript')+'?v='+Date.now();document.head.appendChild(s);})();";
+                loadStatus();
+            });
+            page.addEventListener('pagehide', function () { clearInterval(pollTimer); });
+        })();
+    </script>
+</div>
+</body>
+</html>
