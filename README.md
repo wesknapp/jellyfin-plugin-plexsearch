@@ -7,7 +7,7 @@ Targets **Jellyfin 10.11+**.
 ## How it works
 
 - **Backend (C# plugin):** signs in to Plex with the PIN flow, finds your servers via plex.tv, and proxies search and poster requests. Plex tokens stay on the Jellyfin server and are never sent to browsers.
-- **Frontend (`plexsearch.js`):** watches the Jellyfin search page and adds the Plex results under everything else (works alongside Jellyfin Enhanced's Seerr results). Loaded with the JavaScript Injector plugin.
+- **Frontend (`plexsearch.js`):** watches the Jellyfin search page and adds the Plex results under everything else (works alongside Jellyfin Enhanced's Seerr results). The plugin adds it to the Jellyfin web app automatically (no JavaScript Injector needed).
 
 ## Install
 
@@ -31,7 +31,7 @@ Bump `AssemblyVersion` and `FileVersion` in the `.csproj`, commit, then push a m
 2. **Sign in with Plex** and approve it in the tab that opens.
 3. Pick the server, then **Use this server**.
 4. Optionally tick libraries, then **Save**.
-5. Install the **JavaScript Injector** plugin, add a script, and paste the snippet shown on the settings page. Refresh the web UI.
+5. Refresh the Jellyfin web page (Ctrl+F5). If the On Plex section never appears (for example a reverse proxy caches the page), use the JavaScript Injector snippet shown on the settings page instead.
 
 ## API (for testing)
 
@@ -48,5 +48,5 @@ All under `/PlexSearch`, using your Jellyfin login:
 
 - [x] MVP: sign-in, server/library picker, search section with posters, open in Plex
 - [ ] "Your Plex" badge on Jellyfin detail pages
-- [ ] Load script via File Transformation (no JavaScript Injector needed)
+- [x] Load the search script automatically (no JavaScript Injector needed)
 - [x] Plugin repository manifest
