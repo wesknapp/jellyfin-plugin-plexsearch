@@ -1,0 +1,12 @@
+[
+  {
+    "guid": "8b7cf052-6c7a-4264-9f46-2834493ee694",
+    "name": "Plex Search",
+    "description": "Search a Plex server (including ones shared with you) from Jellyfin search.",
+    "overview": "Adds an On Plex section to Jellyfin search.",
+    "owner": "wesknapp",
+    "category": "General",
+    "imageUrl": "",
+    "versions": []
+  }
+]

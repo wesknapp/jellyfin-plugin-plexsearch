@@ -9,11 +9,21 @@ Targets **Jellyfin 10.11+**.
 - **Backend (C# plugin):** signs in to Plex with the PIN flow, finds your servers via plex.tv, and proxies search and poster requests. Plex tokens stay on the Jellyfin server and are never sent to browsers.
 - **Frontend (`plexsearch.js`):** watches the Jellyfin search page and adds the Plex results under everything else (works alongside Jellyfin Enhanced's Seerr results). Loaded with the JavaScript Injector plugin.
 
-## Install (manual, private repo)
+## Install
 
-1. Open the latest successful run under **Actions → Build plugin** and download the `plexsearch_x.y.z.z` artifact.
-2. Unzip it into your Jellyfin config folder as `plugins/PlexSearch/` (so you have `plugins/PlexSearch/Jellyfin.Plugin.PlexSearch.dll` and `meta.json`).
+1. In Jellyfin, go to **Dashboard → Plugins → Repositories** (the **Manage Repositories** button in 10.11) and add:
+   - Name: `Plex Search`
+   - URL: `https://raw.githubusercontent.com/wesknapp/jellyfin-plugin-plexsearch/main/manifest.json`
+2. Open the **Catalog**, find **Plex Search** and install it.
 3. Restart Jellyfin.
+
+New versions then show up as plugin updates.
+
+**Manual install:** download `plexsearch_x.y.z.z.zip` from the latest [release](https://github.com/wesknapp/jellyfin-plugin-plexsearch/releases), unzip it into your Jellyfin config folder as `plugins/PlexSearch/`, then restart Jellyfin.
+
+## Releasing a new version
+
+Bump `AssemblyVersion` and `FileVersion` in the `.csproj`, commit, then push a matching tag, for example `v0.1.1.0`. The **Build plugin** action builds the zip, publishes a GitHub release and adds the version to `manifest.json`.
 
 ## Set up
 
@@ -39,4 +49,4 @@ All under `/PlexSearch`, using your Jellyfin login:
 - [x] MVP: sign-in, server/library picker, search section with posters, open in Plex
 - [ ] "Your Plex" badge on Jellyfin detail pages
 - [ ] Load script via File Transformation (no JavaScript Injector needed)
-- [ ] Plugin repository manifest
+- [x] Plugin repository manifest
