@@ -77,15 +77,13 @@
     function ensureStyles() {
         if (document.getElementById('plexSearchStyles')) return;
         var css = ''
-            + '#' + SECTION_ID + '{padding:1em 3.3% 2em;}'
-            + '#' + SECTION_ID + ' h2{margin:.2em 0 .6em;font-size:1.3em;display:flex;align-items:center;gap:.5em;}'
+            // Cards use Jellyfin's own card classes, so they are the same size as Jellyfin's and Seerr's cards.
+            + '#' + SECTION_ID + ' h2{display:flex;align-items:center;gap:.5em;}'
             + '#' + SECTION_ID + ' .ps-badge{font-size:.6em;padding:.15em .5em;border-radius:4px;background:#e5a00d;color:#1f1f1f;font-weight:700;}'
-            + '#' + SECTION_ID + ' .ps-row{display:flex;gap:1em;overflow-x:auto;padding-bottom:.5em;scroll-snap-type:x proximity;}'
-            + '#' + SECTION_ID + ' .ps-card{flex:0 0 auto;width:9em;cursor:pointer;text-decoration:none;color:inherit;scroll-snap-align:start;}'
-            + '#' + SECTION_ID + ' .ps-poster{width:9em;height:13.5em;border-radius:6px;background:rgba(127,127,127,.25) center/cover no-repeat;'
-            + 'display:flex;align-items:center;justify-content:center;font-size:.8em;text-align:center;overflow:hidden;}'
-            + '#' + SECTION_ID + ' .ps-title{margin-top:.4em;font-size:.9em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}'
-            + '#' + SECTION_ID + ' .ps-sub{font-size:.75em;opacity:.7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}'
+            + '#' + SECTION_ID + ' .ps-row{display:flex;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin;}'
+            + '#' + SECTION_ID + ' .ps-row>.card{flex:0 0 auto;color:inherit;text-decoration:none;}'
+            + '#' + SECTION_ID + ' .ps-poster{display:flex;align-items:center;justify-content:center;text-align:center;'
+            + 'padding:.5em;box-sizing:border-box;font-size:.9em;background-color:rgba(127,127,127,.25);}'
             + '#' + SECTION_ID + ' .ps-msg{opacity:.7;}';
         var style = document.createElement('style');
         style.id = 'plexSearchStyles';
@@ -121,8 +119,13 @@
     function renderMessage(serverName, msg) {
         var section = getSection();
         if (!section) return;
-        section.innerHTML = '<h2>On Plex <span class="ps-badge">' + esc(serverName || 'PLEX') + '</span></h2>'
-            + '<div class="ps-msg">' + esc(msg) + '</div>';
+        section.innerHTML = heading(serverName)
+            + '<div class="ps-msg padded-left padded-right">' + esc(msg) + '</div>';
+    }
+
+    function heading(serverName) {
+        return '<h2 class="sectionTitle sectionTitle-cards padded-left padded-right">On Plex <span class="ps-badge">'
+            + esc(serverName || 'PLEX') + '</span></h2>';
     }
 
     function renderResults(data) {
@@ -133,14 +136,18 @@
             renderMessage(data.serverName, 'No matches on Plex.');
             return;
         }
-        var html = '<h2>On Plex <span class="ps-badge">' + esc(data.serverName) + '</span></h2><div class="ps-row">';
+        var html = heading(data.serverName) + '<div class="ps-row itemsContainer padded-left padded-right">';
         data.results.forEach(function (r, i) {
             var sub = (r.year ? r.year + ' · ' : '') + (r.type === 'show' ? 'TV' : 'Movie')
                 + (r.libraryTitle ? ' · ' + r.libraryTitle : '');
-            html += '<a class="ps-card" href="' + esc(r.webUrl) + '" target="_blank" rel="noopener" title="Open in Plex">'
-                + '<div class="ps-poster" data-ps-img="' + i + '">' + esc(r.title) + '</div>'
-                + '<div class="ps-title">' + esc(r.title) + '</div>'
-                + '<div class="ps-sub">' + esc(sub) + '</div></a>';
+            html += '<a class="card overflowPortraitCard card-hoverable" href="' + esc(r.webUrl) + '" target="_blank" rel="noopener" title="Open in Plex">'
+                + '<div class="cardBox cardBox-bottompadded"><div class="cardScalable">'
+                + '<div class="cardPadder cardPadder-overflowPortrait"></div>'
+                + '<div class="cardImageContainer coveredImage cardContent ps-poster" data-ps-img="' + i + '">' + esc(r.title) + '</div>'
+                + '</div>'
+                + '<div class="cardText cardTextCentered cardText-first"><bdi>' + esc(r.title) + '</bdi></div>'
+                + '<div class="cardText cardTextCentered cardText-secondary"><bdi>' + esc(sub) + '</bdi></div>'
+                + '</div></a>';
         });
         html += '</div>';
         section.innerHTML = html;
@@ -158,16 +165,41 @@
 
     // ---------- search loop ----------
 
+    // Jellyfin Enhanced's "Discover on Seerr" section loads after the search and goes above ours.
+    // Waiting for it (briefly) stops On Plex from appearing first and then jumping down.
+    var SEERR_WAIT_MS = 3000;
+
+    function seerrSearchEnabled() {
+        var je = window.JellyfinEnhanced;
+        var cfg = je && je.pluginConfig;
+        return !!(cfg && cfg.JellyseerrEnabled && cfg.JellyseerrShowSearchResults);
+    }
+
+    function whenSeerrSettled(seq, started, render) {
+        var wait = seerrSearchEnabled();
+        (function check() {
+            if (seq !== requestSeq) return;
+            var host = findHost();
+            var seerr = host && host.querySelector('.jellyseerr-section');
+            if (!wait || seerr || Date.now() - started >= SEERR_WAIT_MS) {
+                render();
+                return;
+            }
+            setTimeout(check, 150);
+        })();
+    }
+
     function runSearch(query) {
         var seq = ++requestSeq;
-        renderMessage('', 'Searching Plex…');
+        var started = Date.now();
+        removeSection();
         apiGet('Search?query=' + encodeURIComponent(query)).then(function (data) {
             if (seq !== requestSeq) return;
             if (!data.configured) { removeSection(); return; }
-            renderResults(data);
+            whenSeerrSettled(seq, started, function () { renderResults(data); });
         }).catch(function () {
             if (seq !== requestSeq) return;
-            renderMessage('', 'Plex unavailable right now.');
+            whenSeerrSettled(seq, started, function () { renderMessage('', 'Plex unavailable right now.'); });
         });
     }
 
