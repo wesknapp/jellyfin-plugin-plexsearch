@@ -100,7 +100,11 @@
             section.id = SECTION_ID;
             section.className = 'verticalSection';
         }
-        if (section.parentNode !== host || host.lastElementChild !== section) {
+        // Sit after Jellyfin's own results but above Jellyfin Enhanced's "Discover on Seerr" section.
+        var seerr = host.querySelector(':scope > .jellyseerr-section');
+        if (seerr) {
+            if (section.parentNode !== host || section.nextElementSibling !== seerr) host.insertBefore(section, seerr);
+        } else if (section.parentNode !== host || host.lastElementChild !== section) {
             host.appendChild(section);
         }
         return section;
@@ -128,6 +132,21 @@
             + esc(serverName || 'PLEX') + '</span></h2>';
     }
 
+    // On phones and tablets, open the Plex app instead of app.plex.tv.
+    var UA = navigator.userAgent || '';
+    var IS_IOS = /iPad|iPhone|iPod/.test(UA) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    var IS_ANDROID = /Android/i.test(UA);
+
+    function plexLink(r) {
+        var m = /\/server\/([^/?#]+)\//.exec(r.webUrl || '');
+        if (!m || !r.ratingKey || !(IS_IOS || IS_ANDROID)) return r.webUrl;
+        var query = 'metadataKey=' + encodeURIComponent('/library/metadata/' + r.ratingKey) + '&server=' + m[1];
+        if (IS_IOS) return 'plex://preplay/?' + query;
+        // Chrome on Android: open the Plex app, or app.plex.tv if it isn't installed.
+        return 'intent://preplay/?' + query + '#Intent;scheme=plex;package=com.plexapp.android;S.browser_fallback_url='
+            + encodeURIComponent(r.webUrl) + ';end';
+    }
+
     function renderResults(data) {
         freeBlobs();
         var section = getSection();
@@ -140,7 +159,9 @@
         data.results.forEach(function (r, i) {
             var sub = (r.year ? r.year + ' · ' : '') + (r.type === 'show' ? 'TV' : 'Movie')
                 + (r.libraryTitle ? ' · ' + r.libraryTitle : '');
-            html += '<a class="card overflowPortraitCard card-hoverable" href="' + esc(r.webUrl) + '" target="_blank" rel="noopener" title="Open in Plex">'
+            var link = plexLink(r);
+            html += '<a class="card overflowPortraitCard card-hoverable" href="' + esc(link) + '"'
+                + (link === r.webUrl ? ' target="_blank" rel="noopener"' : '') + ' title="Open in Plex">'
                 + '<div class="cardBox cardBox-bottompadded"><div class="cardScalable">'
                 + '<div class="cardPadder cardPadder-overflowPortrait"></div>'
                 + '<div class="cardImageContainer coveredImage cardContent ps-poster" data-ps-img="' + i + '">' + esc(r.title) + '</div>'
@@ -165,41 +186,16 @@
 
     // ---------- search loop ----------
 
-    // Jellyfin Enhanced's "Discover on Seerr" section loads after the search and goes above ours.
-    // Waiting for it (briefly) stops On Plex from appearing first and then jumping down.
-    var SEERR_WAIT_MS = 3000;
-
-    function seerrSearchEnabled() {
-        var je = window.JellyfinEnhanced;
-        var cfg = je && je.pluginConfig;
-        return !!(cfg && cfg.JellyseerrEnabled && cfg.JellyseerrShowSearchResults);
-    }
-
-    function whenSeerrSettled(seq, started, render) {
-        var wait = seerrSearchEnabled();
-        (function check() {
-            if (seq !== requestSeq) return;
-            var host = findHost();
-            var seerr = host && host.querySelector('.jellyseerr-section');
-            if (!wait || seerr || Date.now() - started >= SEERR_WAIT_MS) {
-                render();
-                return;
-            }
-            setTimeout(check, 150);
-        })();
-    }
-
     function runSearch(query) {
         var seq = ++requestSeq;
-        var started = Date.now();
         removeSection();
         apiGet('Search?query=' + encodeURIComponent(query)).then(function (data) {
             if (seq !== requestSeq) return;
             if (!data.configured) { removeSection(); return; }
-            whenSeerrSettled(seq, started, function () { renderResults(data); });
+            renderResults(data);
         }).catch(function () {
             if (seq !== requestSeq) return;
-            whenSeerrSettled(seq, started, function () { renderMessage('', 'Plex unavailable right now.'); });
+            renderMessage('', 'Plex unavailable right now.');
         });
     }
 
@@ -210,7 +206,7 @@
         }
         var q = currentQuery();
         if (q === lastQuery) {
-            // Jellyfin may re-render the results area; keep our section attached at the bottom.
+            // Jellyfin may re-render the results area, and Seerr loads late; keep our section in place.
             if (q.length >= 2 && document.getElementById(SECTION_ID)) getSection();
             return;
         }
