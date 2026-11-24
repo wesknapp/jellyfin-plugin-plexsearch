@@ -9,6 +9,14 @@
     "imageUrl": "",
     "versions": [
       {
+        "version": "0.1.5.0",
+        "changelog": "See GitHub release",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/wesknapp/jellyfin-plugin-plexsearch/releases/download/v0.1.5.0/plexsearch_0.1.5.0.zip",
+        "checksum": "a184279f67d00aa6e304606291b48c16",
+        "timestamp": "2026-11-24T11:48:20Z"
+      },
+      {
         "version": "0.1.4.0",
         "changelog": "See GitHub release",
         "targetAbi": "10.11.0.0",
