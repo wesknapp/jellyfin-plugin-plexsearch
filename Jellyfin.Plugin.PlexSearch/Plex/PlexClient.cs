@@ -18,7 +18,9 @@ public record PlexSearchResult(
     string Type,
     string LibraryTitle,
     string? ImagePath,
-    string WebUrl);
+    string WebUrl,
+    string AndroidAppUrl,
+    string? DiscoverUrl);
 
 /// <summary>Result of a PIN sign-in request.</summary>
 public record PlexPin(long Id, string Code, string AuthUrl);
@@ -319,17 +321,27 @@ public class PlexClient
 
                 int? year = m.TryGetProperty("year", out var y) && y.ValueKind == JsonValueKind.Number ? y.GetInt32() : null;
                 var thumb = Str(m, "thumb");
-                var webUrl = "https://app.plex.tv/desktop/#!/server/" + config.ServerMachineId
-                    + "/details?key=" + Uri.EscapeDataString("/library/metadata/" + ratingKey);
+                var metadataKey = Uri.EscapeDataString("/library/metadata/" + ratingKey);
+                var webUrl = "https://app.plex.tv/desktop/#!/server/" + config.ServerMachineId + "/details?key=" + metadataKey;
+
+                // The Plex Android app opens this straight to the title on this server.
+                var androidAppUrl = "plex://libraries/" + config.ServerMachineId + "/unmatched/"
+                    + (type == "show" ? "tv/" : string.Empty) + metadataKey;
+
+                // The Plex iOS app ignores plex:// links to a title, but opens watch.plex.tv pages for it.
+                var slug = Str(m, "slug");
+                var discoverUrl = string.IsNullOrEmpty(slug) ? null : "https://watch.plex.tv/" + type + "/" + Uri.EscapeDataString(slug);
 
                 results.Add(new PlexSearchResult(
                     ratingKey,
-                    Str(m, "title"),
+                    DisplayTitle(Str(m, "title"), Str(m, "originalTitle")),
                     year,
                     type,
                     Str(m, "librarySectionTitle"),
                     string.IsNullOrEmpty(thumb) ? null : thumb,
-                    webUrl));
+                    webUrl,
+                    androidAppUrl,
+                    discoverUrl));
 
                 if (results.Count >= max)
                 {
@@ -352,6 +364,18 @@ public class PlexClient
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("image/*"));
         var client = NewClient(10);
         return await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Plex keeps a short title and an original title, e.g. "Dune" and "Dune: Part One".
+    /// Use the original title when it is the fuller form of the same name; a foreign-language
+    /// original title (e.g. "Le Fabuleux Destin d'Amélie Poulain") is left out.
+    /// </summary>
+    private static string DisplayTitle(string title, string originalTitle)
+    {
+        return originalTitle.Length > title.Length && originalTitle.StartsWith(title, StringComparison.OrdinalIgnoreCase)
+            ? originalTitle
+            : title;
     }
 
     private static string Str(JsonElement el, string name)

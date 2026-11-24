@@ -137,19 +137,22 @@
     var IS_IOS = /iPad|iPhone|iPod/.test(UA) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     var IS_ANDROID = /Android/i.test(UA);
 
-    function plexAppQuery(r) {
-        var m = /\/server\/([^/?#]+)\//.exec(r.webUrl || '');
-        if (!m || !r.ratingKey) return null;
-        return 'metadataKey=' + encodeURIComponent('/library/metadata/' + r.ratingKey) + '&server=' + m[1];
+    // The link the Plex app understands on this device, or null for the web app.
+    //  - Android: plex://libraries/... opens the title on your server.
+    //  - iPhone/iPad: the app ignores plex:// links to titles, but watch.plex.tv opens the title's page in the app.
+    function plexAppLink(r) {
+        if (IS_ANDROID) return r.androidAppUrl || null;
+        if (IS_IOS) return r.discoverUrl || null;
+        return null;
     }
 
-    // Link for the card when opened from a phone's web browser.
+    // Link for the card in a phone's web browser (the Jellyfin apps go through openUrl below).
     function plexLink(r) {
-        var query = plexAppQuery(r);
-        if (!query || !(IS_IOS || IS_ANDROID)) return r.webUrl;
-        if (IS_IOS) return 'plex://preplay/?' + query;
+        var app = plexAppLink(r);
+        if (!app) return r.webUrl;
+        if (IS_IOS) return app;
         // Chrome on Android: open the Plex app, or app.plex.tv if it isn't installed.
-        return 'intent://preplay/?' + query + '#Intent;scheme=plex;package=com.plexapp.android;S.browser_fallback_url='
+        return app.replace(/^plex:\/\//, 'intent://') + '#Intent;scheme=plex;package=com.plexapp.android;S.browser_fallback_url='
             + encodeURIComponent(r.webUrl) + ';end';
     }
 
@@ -165,8 +168,7 @@
         if (!shell) return;
         e.preventDefault();
         e.stopPropagation();
-        var app = card.getAttribute('data-ps-app');
-        shell.openUrl(app && (IS_IOS || IS_ANDROID) ? app : card.getAttribute('data-ps-web'), '_blank');
+        shell.openUrl(card.getAttribute('data-ps-app') || card.getAttribute('data-ps-web'), '_blank');
     }, true);
 
     function renderResults(data) {
@@ -182,11 +184,11 @@
             var sub = (r.year ? r.year + ' · ' : '') + (r.type === 'show' ? 'TV' : 'Movie')
                 + (r.libraryTitle ? ' · ' + r.libraryTitle : '');
             var link = plexLink(r);
-            var query = plexAppQuery(r);
+            var app = plexAppLink(r);
             html += '<a class="card overflowPortraitCard card-hoverable" href="' + esc(link) + '"'
                 + ' data-ps-web="' + esc(r.webUrl) + '"'
-                + (query ? ' data-ps-app="' + esc('plex://preplay/?' + query) + '"' : '')
-                + (link === r.webUrl ? ' target="_blank" rel="noopener"' : '') + ' title="Open in Plex">'
+                + (app ? ' data-ps-app="' + esc(app) + '"' : '')
+                + (/^https?:/i.test(link) ? ' target="_blank" rel="noopener"' : '') + ' title="Open in Plex">'
                 + '<div class="cardBox cardBox-bottompadded"><div class="cardScalable">'
                 + '<div class="cardPadder cardPadder-overflowPortrait"></div>'
                 + '<div class="cardImageContainer coveredImage cardContent ps-poster" data-ps-img="' + i + '">' + esc(r.title) + '</div>'
