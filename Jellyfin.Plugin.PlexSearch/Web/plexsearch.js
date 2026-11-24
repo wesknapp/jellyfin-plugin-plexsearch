@@ -84,7 +84,8 @@
             + '#' + SECTION_ID + ' .ps-row>.card{flex:0 0 auto;color:inherit;text-decoration:none;}'
             + '#' + SECTION_ID + ' .ps-poster{display:flex;align-items:center;justify-content:center;text-align:center;'
             + 'padding:.5em;box-sizing:border-box;font-size:.9em;background-color:rgba(127,127,127,.25);}'
-            + '#' + SECTION_ID + ' .ps-msg{opacity:.7;}';
+            + '#' + SECTION_ID + ' .ps-msg{opacity:.7;}'
+            + '#' + SECTION_ID + ' .ps-retry{color:inherit;text-decoration:underline;}';
         var style = document.createElement('style');
         style.id = 'plexSearchStyles';
         style.textContent = css;
@@ -213,16 +214,30 @@
 
     // ---------- search loop ----------
 
-    function runSearch(query) {
+    function runSearch(query, isRetry) {
         var seq = ++requestSeq;
-        removeSection();
+        if (!isRetry) removeSection();
         apiGet('Search?query=' + encodeURIComponent(query)).then(function (data) {
             if (seq !== requestSeq) return;
             if (!data.configured) { removeSection(); return; }
             renderResults(data);
         }).catch(function () {
             if (seq !== requestSeq) return;
+            // The server already retries once; one more try from here covers a slow phone connection.
+            if (!isRetry) {
+                setTimeout(function () { if (seq === requestSeq) runSearch(query, true); }, 1000);
+                return;
+            }
             renderMessage('', 'Plex unavailable right now.');
+            var section = document.getElementById(SECTION_ID);
+            var msg = section && section.querySelector('.ps-msg');
+            if (msg) {
+                msg.insertAdjacentHTML('beforeend', ' <a href="#" class="ps-retry button-link">Try again</a>');
+                msg.querySelector('.ps-retry').addEventListener('click', function (e) {
+                    e.preventDefault();
+                    if (currentQuery() === query) runSearch(query);
+                });
+            }
         });
     }
 

@@ -87,6 +87,34 @@ public class PlexClient
         return await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// GET with one retry. Connections to a Plex server now and then stall or fail the TLS handshake
+    /// (a pooled connection the server already closed, a blip on the way); a fresh attempt nearly always works.
+    /// </summary>
+    private async Task<JsonDocument> SendWithRetryAsync(string url, string? token, CancellationToken ct)
+    {
+        const int Attempts = 2;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                using var request = NewRequest(HttpMethod.Get, url, token);
+                return await SendJsonAsync(request, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (attempt < Attempts && !ct.IsCancellationRequested && IsTransient(ex))
+            {
+                await Task.Delay(300, ct).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private static bool IsTransient(Exception ex) => ex switch
+    {
+        TaskCanceledException => true, // HttpClient timeout
+        HttpRequestException h => h.StatusCode is null || (int)h.StatusCode >= 500,
+        _ => false
+    };
+
     // ---------- Sign-in (PIN flow) ----------
 
     public async Task<PlexPin> CreatePinAsync(CancellationToken ct)
@@ -276,8 +304,7 @@ public class PlexClient
         var config = Config;
         var max = Math.Clamp(config.MaxResults, 1, 50);
         var url = config.ServerUri + "/hubs/search?query=" + Uri.EscapeDataString(query) + "&limit=" + (max * 2);
-        using var request = NewRequest(HttpMethod.Get, url, config.ServerAccessToken);
-        using var doc = await SendJsonAsync(request, ct).ConfigureAwait(false);
+        using var doc = await SendWithRetryAsync(url, config.ServerAccessToken, ct).ConfigureAwait(false);
 
         var allowed = new HashSet<string>(config.LibrarySectionIds ?? Array.Empty<string>());
         var results = new List<PlexSearchResult>();
